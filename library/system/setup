@@ -626,16 +626,28 @@ class LinuxHardware(Hardware):
             if line.startswith('/'):
                 fields = line.rstrip('\n').split()
                 if(fields[2] != 'none'):
-                    statvfs_result = os.statvfs(fields[1])
-                    self.facts['mounts'].append(
-                        {'mount': fields[1],
-                         'device':fields[0],
-                         'fstype': fields[2],
-                         'options': fields[3],
-                         # statvfs data
-                         'size_total': statvfs_result.f_bsize * statvfs_result.f_blocks,
-                         'size_available': statvfs_result.f_bsize * (statvfs_result.f_bavail),
-                         })
+                    try:
+                        statvfs_result = os.statvfs(fields[1])
+                        self.facts['mounts'].append(
+                            {'mount': fields[1],
+                             'device':fields[0],
+                             'fstype': fields[2],
+                             'options': fields[3],
+                             # statvfs data
+                             'size_total': statvfs_result.f_bsize * statvfs_result.f_blocks,
+                             'size_available': statvfs_result.f_bsize * (statvfs_result.f_bavail),
+                             })
+                    except OSError, e:
+                        # don't have access to stat so we'll set to None
+                        self.facts['mounts'].append(
+                            {'mount': fields[1],
+                             'device':fields[0],
+                             'fstype': fields[2],
+                             'options': fields[3],
+                             # statvfs data
+                             'size_total': None,
+                             'size_available': None,
+                             })
 
     def get_device_facts(self):
         self.facts['devices'] = {}
@@ -1525,13 +1537,13 @@ class GenericBsdIfconfigNetwork(Network):
     def get_default_interfaces(self, route_path):
 
         # Use the commands:
-        #     route -n get 8.8.8.8                     -> Google public DNS
-        #     route -n get 2404:6800:400a:800::1012    -> ipv6.google.com
+        #     route -n get 8.8.8.8                            -> Google public DNS
+        #     route -n get -inet6 2404:6800:400a:800::1012    -> ipv6.google.com
         # to find out the default outgoing interface, address, and gateway
 
         command = dict(
             v4 = [route_path, '-n', 'get', '8.8.8.8'],
-            v6 = [route_path, '-n', 'get', '2404:6800:400a:800::1012']
+            v6 = [route_path, '-n', 'get', '-inet6', '2404:6800:400a:800::1012']
         )
 
         interface = dict(v4 = {}, v6 = {})
@@ -1548,9 +1560,12 @@ class GenericBsdIfconfigNetwork(Network):
             lines = out.split('\n')
             for line in lines:
                 words = line.split()
-                # look for first word starting interface
-                if len(words) > 0 and words[0] == 'interface:':
-                    interface[v]['interface'] = words[1]
+                # Collect output from route command
+                if len(words) > 0:
+                    if words[0] == 'interface:':
+                        interface[v]['interface'] = words[1]
+                    if words[0] == 'gateway:':
+                        interface[v]['gateway'] = words[1]
 
         return interface['v4'], interface['v6']
 
